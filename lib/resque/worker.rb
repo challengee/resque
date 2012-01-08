@@ -164,13 +164,14 @@ module Resque
 
         if not paused? and job = reserve
           log "got: #{job.inspect}"
+          job.worker = self
           run_hook :before_fork, job
           working_on job
 
           if @child = fork
             srand # Reseeding
             procline "Forked #{@child} at #{Time.now.to_i}"
-            Process.wait
+            Process.wait(@child)
           else
             procline "Processing #{job.queue} since #{Time.now.to_i}"
             perform(job, &block)
@@ -196,6 +197,7 @@ module Resque
     def process(job = nil, &block)
       return unless job ||= reserve
 
+      job.worker = self
       working_on job
       perform(job, &block)
     ensure
@@ -244,7 +246,7 @@ module Resque
     # A splat ("*") means you want every queue (in alpha order) - this
     # can be useful for dynamically adding new queues.
     def queues
-      @queues[0] == "*" ? Resque.queues.sort : @queues
+      @queues.map {|queue| queue == "*" ? Resque.queues.sort : queue }.flatten.uniq
     end
 
     # Not every platform supports fork. Here we do our magic to
@@ -438,7 +440,6 @@ module Resque
     # Given a job, tells Redis we're working on it. Useful for seeing
     # what workers are doing and when.
     def working_on(job)
-      job.worker = self
       data = encode \
         :queue   => job.queue,
         :run_at  => Time.now.strftime("%Y/%m/%d %H:%M:%S %Z"),
